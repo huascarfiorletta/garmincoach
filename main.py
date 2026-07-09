@@ -421,21 +421,41 @@ class MainFrame(wx.Frame):
             password = pwd_dlg.GetValue()
             self.gm.save_password(user["email"], password)
 
+        self._start_fetch(user, password)
+
+    def _start_fetch(self, user, password):
         self.fetch_btn.Disable()
         self.fetch_gauge.Show(); self.fetch_gauge.Pulse()
         self._set_status(f"Fetching data for {user['name']}…", ok=True)
         def worker():
             try:
                 data = self.gm.fetch_user_data(user["email"], password)
-                wx.CallAfter(self._fetch_done, data, None)
-            except Exception as exc: wx.CallAfter(self._fetch_done, None, str(exc))
+                wx.CallAfter(self._fetch_done, data, None, user, password)
+            except Exception as exc:
+                wx.CallAfter(self._fetch_done, None, str(exc), user, password)
         threading.Thread(target=worker, daemon=True).start()
 
-    def _fetch_done(self, data, error):
+    def _fetch_done(self, data, error, user=None, password=None):
         self.fetch_gauge.Hide(); self.fetch_btn.Enable()
         if error:
             self._set_status(f"Fetch failed: {error}", ok=False)
-            wx.MessageBox(f"Error:\n\n{error}", "Fetch Error", wx.ICON_ERROR)
+            choice = wx.MessageDialog(
+                self,
+                f"Login failed for {user['name']}:\n\n{error}\n\nThis often happens if your Garmin password changed.",
+                "Fetch Error",
+                wx.YES_NO | wx.CANCEL | wx.ICON_ERROR,
+            )
+            choice.SetYesNoCancelLabels("New Password", "Retry", "Cancel")
+            result = choice.ShowModal()
+            if result == wx.ID_YES:
+                pwd_dlg = wx.PasswordEntryDialog(self, f"Enter new Garmin password for {user['name']}:", "Login")
+                if pwd_dlg.ShowModal() == wx.ID_OK:
+                    new_password = pwd_dlg.GetValue()
+                    self.gm.save_password(user["email"], new_password)
+                    self._start_fetch(user, new_password)
+            elif result == wx.ID_NO:
+                self._start_fetch(user, password)
+            # else: Cancel — do nothing
         else:
             self.garmin_data = data
             self._set_status(f"✓  Live data fetched for {self._current_user()['name']}", ok=True)
