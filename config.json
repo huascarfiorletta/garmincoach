@@ -1,0 +1,29 @@
+{
+    "users": [
+    ],
+    "questions": [
+        {
+            "id": 1,
+
+            "text": "Evaluate these workouts"
+        },
+        {
+            "id": 2,
+            "text": "What should I do for my next running workout?"
+        },
+        {
+            "id": 3,
+            "text": "What should I do for my next cycling workout?"
+        },
+        {
+            "id": 4,
+            "text": "What should I do for my next swimming workout?"
+        },
+        {
+            "id": 5,
+            "text": "When should my next workout be?"
+        }
+    ],
+    "custom_questions": [
+    ]
+}

@@ -1,0 +1,7 @@
+__pycache__/
+.idea/
+.eggs/
+.cache/
+build/
+.DS_Store
+dist/Garmin Coach.app

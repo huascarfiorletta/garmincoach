@@ -1,0 +1,7 @@
+garminconnect
+wxpython
+keyring
+langchain_community
+modulegraph
+macholib
+setuptools
