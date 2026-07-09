@@ -81,6 +81,8 @@ class GarminCoachApp(wx.App):
             
         frame = MainFrame(config)
         frame.Show()
+        frame.Raise()
+        frame.SetFocus()
         return True
 
 # ── Main window ────────────────────────────────────────────────────────────────
