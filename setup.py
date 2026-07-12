@@ -16,7 +16,7 @@ OPTIONS = {
     'iconfile': 'garmincoach.icns',
     'packages': ['wx', 'requests', 'keyring', 'garminconnect'],
     'plist': {
-        'CFBundleName': 'Garmin Coach',
+        'CFBundleName': 'GarminCoach',
         'CFBundleDisplayName': 'Garmin Coach',
         'CFBundleGetInfoString': "Garmin Coach Assistant",
         'CFBundleIdentifier': "com.garmincoach.app",
@@ -149,14 +149,11 @@ def _check(resp):
     '422 Unprocessable Entity') and hides the actually useful part --
     GitHub's JSON error body (e.g. {"errors": [{"code": "already_exists"}]})."""
     if not resp.ok:
+        print(resp.status_code)
         try:
             print("GitHub API error response:", resp.json())
         except ValueError:
             print("GitHub API error response:", resp.text)
-    resp.raise_for_status()
-    if not resp.ok:
-        print(resp.status_code)
-        print(resp.text)
         resp.raise_for_status()
 
 
@@ -185,16 +182,24 @@ def _delete_existing_asset(session, repo_slug, release_id, filename):
     upload, which otherwise cause a 422 'already_exists' on re-upload."""
     resp = session.get(f"{API_ROOT}/repos/{repo_slug}/releases/{release_id}")
     _check(resp)
-    for asset in resp.json().get("assets", []):
+
+    assets = resp.json().get("assets", [])
+    print(f"Found {len(assets)} assets")
+
+
+    for asset in assets:
+        print(asset["id"], repr(asset["name"]), asset.get("state"))
         if asset["name"] == filename:
             del_resp = session.delete(
                 f"{API_ROOT}/repos/{repo_slug}/releases/assets/{asset['id']}"
             )
+            print(del_resp.status_code, del_resp.text)
             if del_resp.status_code not in (204, 404):
                 _check(del_resp)
 
 
 def _upload_asset(session, release, zip_path: Path):
+    print("Uploading", repr(zip_path.name))
     upload_url = release["upload_url"].split("{", 1)[0]  # strip {?name,label}
     resp = session.post(
         upload_url,
@@ -202,7 +207,7 @@ def _upload_asset(session, release, zip_path: Path):
         data=zip_path.read_bytes(),
         headers={"Content-Type": "application/zip"},
     )
-    resp.raise_for_status()
+    _check(resp)
     return resp.json()
 
 
@@ -226,7 +231,6 @@ def publish_app():
     release = _get_or_create_release(session, repo_slug)
     _delete_existing_asset(session, repo_slug, release["id"], zip_path.name)
 
-    print(f"Uploading app")
     try:
         asset = _upload_asset(session, release, zip_path)
     except requests.exceptions.HTTPError:
@@ -235,7 +239,7 @@ def publish_app():
         # earlier upload). Re-check for it and retry once.
         print("Upload failed -- re-checking for a stray asset and retrying once...")
         _delete_existing_asset(session, repo_slug, release["id"], zip_path.name)
-    asset = _upload_asset(session, release, zip_path)
+        asset = _upload_asset(session, release, zip_path)
 
     print(f"Published version {APP_VERSION}: {asset['browser_download_url']}")
 

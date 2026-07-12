@@ -29,7 +29,7 @@ def get_base_path():
 BASE_PATH = get_base_path()
 CONFIG_FILE = os.path.join(BASE_PATH, "config.json")
 DEFAULT_PROMPT_LENGTH = 64000
-DEFAULT_MAX_ACTIVITIES = 20
+DEFAULT_MAX_ACTIVITIES = 5
 QUERY_FILE = os.path.join(BASE_PATH, "query.txt")
 CACHE_DIR = os.path.join(BASE_PATH, ".cache")
 
