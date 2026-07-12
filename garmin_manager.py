@@ -4,6 +4,8 @@ import keyring
 from garminconnect import Garmin
 from datetime import date, timedelta
 
+from garmin_summarize import summarize_garmin_data
+
 SERVICE_NAME = "GarminCoach"
 
 class GarminManager:
@@ -36,6 +38,22 @@ class GarminManager:
         except Exception as e:
             raise ConnectionError(f"Failed to authenticate with Garmin: {e}")
 
+    def fetch_activity_laps(self, client, activity_id):
+        """
+        Fetch the real per-lap data for a single activity (lap-by-lap HR,
+        power, cadence, pace, GCT, etc), as opposed to the split-type
+        aggregates already embedded in the activity summary.
+
+        Returns a list of lap dicts (Garmin's "lapDTOs"), or an empty list
+        if the activity has no laps or the request fails.
+        """
+        try:
+            splits = client.get_activity_splits(activity_id)
+            return (splits or {}).get("lapDTOs", [])
+        except Exception as e:
+            print(f"Warning: could not fetch laps for activity {activity_id}: {e}")
+            return []
+
     def fetch_user_data(self, email, password, days=7):
         cache_file = os.path.join(self.cache_dir, f"{email}_data.json")
         
@@ -48,6 +66,13 @@ class GarminManager:
             start_date.isoformat(), end_date.isoformat(), ""
         )
         
+        # Fetch real per-lap data for each activity and attach it before
+        # pruning, so summarize_garmin_data() can keep it.
+        for activity in activities:
+            activity_id = activity.get("activityId")
+            if activity_id is not None:
+                activity["laps"] = self.fetch_activity_laps(client, activity_id)
+
         # Fetch some more details like stats
         stats = client.get_stats(end_date.isoformat())
         
@@ -56,10 +81,14 @@ class GarminManager:
             "stats": stats,
             "fetch_date": end_date.isoformat()
         }
-        
+
         with open(cache_file, "w") as f:
             json.dump(data, f, indent=4)
-            
+
+        # Prune down to the coaching-relevant fields, keeping the same
+        # structure/key names as the raw Garmin payload (see garmin_summarize.py)
+        data = summarize_garmin_data(data)
+
         return data
 
     def get_cached_data(self, email):
