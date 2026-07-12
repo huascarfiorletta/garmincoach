@@ -4,4 +4,4 @@ __pycache__/
 .cache/
 build/
 .DS_Store
-dist/Garmin Coach.app
+dist/
