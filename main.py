@@ -8,6 +8,9 @@ import sys
 import wx
 
 from garmin_manager import GarminManager
+from garmin_summarize import summarize_garmin_data
+
+
 # from llm_connectors import OllamaConnector
 
 def get_base_path():
@@ -483,6 +486,7 @@ class MainFrame(wx.Frame):
         except: max_act = DEFAULT_MAX_ACTIVITIES
 
         data_to_serialize = copy.deepcopy(self.garmin_data)
+        data_to_serialize = summarize_garmin_data(data_to_serialize)
         if "activities" in data_to_serialize:
             data_to_serialize["activities"] = data_to_serialize["activities"][:max_act]
         json_data = json.dumps(data_to_serialize, indent=2)

@@ -61,6 +61,15 @@ ACTIVITY_FIELDS = [
     "powerTimeInZone_1", "powerTimeInZone_2", "powerTimeInZone_3", "powerTimeInZone_4",
     "powerTimeInZone_5", "powerTimeInZone_6", "powerTimeInZone_7",
     "splitSummaries",
+    "vO2MaxValue",
+    # Recovery / training readiness
+    "recoveryTime",
+    "trainingStatus",
+    "acuteTrainingLoad",
+    "hrvStatus",
+    "racePredictor",
+    "lactateThreshold",
+    "lapCount", "hasSplits",
 ]
 
 ACTIVITY_TYPE_FIELDS = ["typeKey"]
@@ -96,6 +105,48 @@ RECOVERY_EVENT_FIELDS = [
     "bodyBatteryImpact", "shortFeedback", "activityName",
 ]
 
+LAP_FIELDS = [
+    "lapIndex",
+    "distance",
+    "duration",
+    "elapsedDuration",
+    "movingDuration",
+
+    "averageHR",
+    "maxHR",
+
+    "averagePower",
+    "normalizedPower",
+    "maxPower",
+    "minPower",
+
+    "averageSpeed",
+    "averageMovingSpeed",
+    "maxSpeed",
+    "avgGradeAdjustedSpeed",
+
+    "averageRunCadence",
+    "maxRunCadence",
+    "strideLength",
+
+    "groundContactTime",
+    "groundContactBalanceLeft",
+    "verticalOscillation",
+    "verticalRatio",
+
+    "elevationGain",
+    "maxElevation",
+    "minElevation",
+
+    "calories",
+    "bmrCalories",
+
+    "avgRespirationRate",
+    "maxRespirationRate",
+
+    "intensityType",
+    "totalWork",
+]
 
 # --------------------------------------------------------------------------
 # generic helper
@@ -121,7 +172,7 @@ def _filter_activity(activity: dict) -> dict:
         out["splitSummaries"] = [_pick(s, SPLIT_FIELDS) for s in activity["splitSummaries"]]
 
     if "laps" in activity:
-        out["laps"] = activity["laps"]
+        out["laps"] = [_pick(s, LAP_FIELDS) for s in activity["laps"]]
 
     return out
 
@@ -171,8 +222,27 @@ def summarize_garmin_data(data: dict, include_wellness: bool = True) -> dict:
     if include_wellness and "stats" in data:
         result["stats"] = _filter_stats(data["stats"])
 
-    return result
+    rounded_result = _round_numbers(result)
 
+    return rounded_result
+
+def _round_numbers(obj):
+    """Round all floats to 3 decimals, except GPS coordinates."""
+    if isinstance(obj, dict):
+        return {
+            k: (v if k in ("latitude", "longitude", "startLatitude", "startLongitude",
+                           "endLatitude", "endLongitude")
+               else _round_numbers(v))
+            for k, v in obj.items()
+        }
+
+    if isinstance(obj, list):
+        return [_round_numbers(v) for v in obj]
+
+    if isinstance(obj, float):
+        return round(obj, 3)
+
+    return obj
 
 if __name__ == "__main__":
     import sys
