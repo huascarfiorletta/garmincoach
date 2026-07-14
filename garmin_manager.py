@@ -8,6 +8,10 @@ from garmin_summarize import summarize_garmin_data
 
 SERVICE_NAME = "GarminCoach"
 
+# download additional useful fields
+# optional to save password in keychain, default no, so that no permissions are requested (spooks users)
+
+
 class GarminManager:
     def __init__(self, cache_dir=".cache"):
         self.cache_dir = cache_dir

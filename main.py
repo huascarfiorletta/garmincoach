@@ -33,6 +33,7 @@ BASE_PATH = get_base_path()
 CONFIG_FILE = os.path.join(BASE_PATH, "config.json")
 DEFAULT_PROMPT_LENGTH = 64000
 DEFAULT_MAX_ACTIVITIES = 5
+DEFAULT_DAYS_TO_FETCH = 7
 QUERY_FILE = os.path.join(BASE_PATH, "query.txt")
 CACHE_DIR = os.path.join(BASE_PATH, ".cache")
 
@@ -63,6 +64,36 @@ def load_config():
 def save_config(config):
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=4)
+
+# ── Password prompt (with inline "remember" checkbox) ──────────────────────────
+
+class PasswordDialog(wx.Dialog):
+    def __init__(self, parent, message, title="Login", remember_default=False):
+        super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE)
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        sizer.Add(wx.StaticText(self, label=message), flag=wx.ALL, border=12)
+
+        self.password_ctrl = wx.TextCtrl(self, style=wx.TE_PASSWORD | wx.TE_PROCESS_ENTER, size=(280, -1))
+        sizer.Add(self.password_ctrl, flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=12)
+
+        self.remember_chk = wx.CheckBox(self, label="Save password for future use (stores in Keychain)")
+        self.remember_chk.SetValue(remember_default)
+        sizer.Add(self.remember_chk, flag=wx.ALL, border=12)
+
+        btn_sizer = self.CreateButtonSizer(wx.OK | wx.CANCEL)
+        sizer.Add(btn_sizer, flag=wx.EXPAND | wx.ALL, border=12)
+
+        self.password_ctrl.Bind(wx.EVT_TEXT_ENTER, lambda evt: self.EndModal(wx.ID_OK))
+
+        self.SetSizerAndFit(sizer)
+        self.password_ctrl.SetFocus()
+
+    def GetValue(self):
+        return self.password_ctrl.GetValue()
+
+    def GetRemember(self):
+        return self.remember_chk.GetValue()
 
 # ── App entry point ────────────────────────────────────────────────────────────
 
@@ -102,10 +133,17 @@ class MainFrame(wx.Frame):
         self.garmin_data = None
         self.gm = GarminManager(cache_dir=CACHE_DIR)
         self.questions = self.config["questions"]
+        self._save_pwd_pref = False  # remembers the last "save password" checkbox state this session
 
         self._build_ui()
         self.Centre()
         self._refresh_data_status()
+        self._last_find_query = ""
+        self._last_find_pos = 0
+
+        find_id = wx.NewIdRef()
+        self.Bind(wx.EVT_MENU, self._on_find, id=find_id)
+        self.SetAcceleratorTable(wx.AcceleratorTable([(wx.ACCEL_CTRL, ord('F'), find_id)]))
 
     def _build_ui(self):
         self.scroll = wx.ScrolledWindow(self, style=wx.VSCROLL)
@@ -120,7 +158,7 @@ class MainFrame(wx.Frame):
         root.Add(wx.StaticLine(self.scroll),      flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=16)
         root.Add(self._build_ask_section(),       flag=wx.EXPAND | wx.ALL, border=16)
         root.Add(wx.StaticLine(self.scroll),      flag=wx.EXPAND | wx.LEFT | wx.RIGHT, border=16)
-        root.Add(self._build_response_section(),  flag=wx.EXPAND | wx.ALL, border=16)
+        root.Add(self._build_response_section(),  proportion=1, flag=wx.EXPAND | wx.ALL, border=16)
 
         self.scroll.SetSizer(root)
         frame_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -162,11 +200,17 @@ class MainFrame(wx.Frame):
     def _build_data_section(self):
         box = wx.BoxSizer(wx.VERTICAL)
         box.Add(self._section_title("2 — Garmin Data"), flag=wx.BOTTOM, border=8)
+
         row = wx.BoxSizer(wx.HORIZONTAL)
         self.data_status_lbl = wx.StaticText(self.scroll, label="Checking cache…")
-        self.fetch_btn = wx.Button(self.scroll, label="Fetch from Garmin")
+        self.fetch_btn = wx.Button(self.scroll, label="Fetch data from Garmin")
         self.fetch_btn.Bind(wx.EVT_BUTTON, self._on_fetch)
+        self.days_ctrl = wx.TextCtrl(self.scroll, value=str(DEFAULT_DAYS_TO_FETCH), size=(40, -1))
+
         row.Add(self.data_status_lbl, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+        row.Add(wx.StaticText(self.scroll, label="Days to fetch:"), flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+        row.Add(self.days_ctrl, flag=wx.ALIGN_CENTER_VERTICAL)
+        row.AddSpacer(10)
         row.Add(self.fetch_btn, flag=wx.ALIGN_CENTER_VERTICAL)
         box.Add(row, flag=wx.EXPAND)
         self.fetch_gauge = wx.Gauge(self.scroll, range=100)
@@ -200,7 +244,7 @@ class MainFrame(wx.Frame):
 
     def _build_ask_section(self):
         box = wx.BoxSizer(wx.VERTICAL)
-        box.Add(self._section_title("4 — Reduce prompt size, useful for prompts including all the training history"),
+        box.Add(self._section_title("4 — Reduce prompt size, in case data is too much for the LLM"),
                 flag=wx.BOTTOM, border=8)
 
         settings_grid = wx.FlexGridSizer(1, 4, 8, 8)
@@ -234,8 +278,12 @@ class MainFrame(wx.Frame):
     def _build_response_section(self):
         box = wx.BoxSizer(wx.VERTICAL)
         box.Add(self._section_title("5 — Prompt, past this in your favorite LLM"), flag=wx.BOTTOM, border=8)
-        self.response_text = wx.TextCtrl(self.scroll, style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_WORDWRAP | wx.BORDER_SIMPLE, size=(-1, 200))
-        box.Add(self.response_text, flag=wx.EXPAND)
+        self.response_text = wx.TextCtrl(
+            self.scroll,
+            style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_WORDWRAP | wx.BORDER_SIMPLE,
+            size=(-1, 200),
+        )
+        box.Add(self.response_text, proportion=1, flag=wx.EXPAND)
         return box
 
     def _current_user(self):
@@ -417,12 +465,17 @@ class MainFrame(wx.Frame):
             dlg = wx.MessageDialog(self, f"Refresh fresh data from Garmin for {user['name']}?", "Confirm", wx.YES_NO | wx.ICON_QUESTION)
             if dlg.ShowModal() != wx.ID_YES: return
 
-        password = self.gm.get_password(user["email"])
+        password = self.gm.get_password(user["email"]) if self._save_pwd_pref else None
         if not password:
-            pwd_dlg = wx.PasswordEntryDialog(self, f"Enter Garmin password for {user["email"]}:", "Login")
-            if pwd_dlg.ShowModal() != wx.ID_OK: return
+            pwd_dlg = PasswordDialog(self, f"Enter Garmin password for {user['email']}:", "Login", remember_default=self._save_pwd_pref)
+            if pwd_dlg.ShowModal() != wx.ID_OK:
+                pwd_dlg.Destroy()
+                return
             password = pwd_dlg.GetValue()
-            self.gm.save_password(user["email"], password)
+            self._save_pwd_pref = pwd_dlg.GetRemember()
+            pwd_dlg.Destroy()
+            if self._save_pwd_pref:
+                self.gm.save_password(user["email"], password)
 
         self._start_fetch(user, password)
 
@@ -430,9 +483,11 @@ class MainFrame(wx.Frame):
         self.fetch_btn.Disable()
         self.fetch_gauge.Show(); self.fetch_gauge.Pulse()
         self._set_status(f"Fetching data for {user['name']}…", ok=True)
+        try: days = int(self.days_ctrl.GetValue())
+        except: days = DEFAULT_DAYS_TO_FETCH
         def worker():
             try:
-                data = self.gm.fetch_user_data(user["email"], password)
+                data = self.gm.fetch_user_data(user["email"], password, days=days)
                 wx.CallAfter(self._fetch_done, data, None, user, password)
             except Exception as exc:
                 wx.CallAfter(self._fetch_done, None, str(exc), user, password)
@@ -451,11 +506,16 @@ class MainFrame(wx.Frame):
             choice.SetYesNoCancelLabels("New Password", "Retry", "Cancel")
             result = choice.ShowModal()
             if result == wx.ID_YES:
-                pwd_dlg = wx.PasswordEntryDialog(self, f"Enter new Garmin password for {user['name']}:", "Login")
+                pwd_dlg = PasswordDialog(self, f"Enter new Garmin password for {user['name']}:", "Login", remember_default=self._save_pwd_pref)
                 if pwd_dlg.ShowModal() == wx.ID_OK:
                     new_password = pwd_dlg.GetValue()
-                    self.gm.save_password(user["email"], new_password)
+                    self._save_pwd_pref = pwd_dlg.GetRemember()
+                    pwd_dlg.Destroy()
+                    if self._save_pwd_pref:
+                        self.gm.save_password(user["email"], new_password)
                     self._start_fetch(user, new_password)
+                else:
+                    pwd_dlg.Destroy()
             elif result == wx.ID_NO:
                 self._start_fetch(user, password)
             # else: Cancel — do nothing
@@ -476,10 +536,7 @@ class MainFrame(wx.Frame):
         questions = [self.questions[i]["text"] for i in checked_indices]
         custom = self.custom_input.GetValue().strip()
         if custom: questions.append(custom)
-        if not questions:
-            wx.MessageBox("No questions selected.", "Error", wx.ICON_WARNING)
-            return None
-        
+
         try: max_len = int(self.max_len_ctrl.GetValue())
         except: max_len = DEFAULT_PROMPT_LENGTH
         try: max_act = int(self.max_act_ctrl.GetValue())
@@ -488,6 +545,9 @@ class MainFrame(wx.Frame):
         data_to_serialize = copy.deepcopy(self.garmin_data)
         data_to_serialize = summarize_garmin_data(data_to_serialize)
         if "activities" in data_to_serialize:
+            # Sort from oldest to newest using the date string
+            data_to_serialize["activities"].sort(key=lambda x: x["startTimeLocal"])
+            # Slice to the maximum number of allowed activities
             data_to_serialize["activities"] = data_to_serialize["activities"][:max_act]
         json_data = json.dumps(data_to_serialize, indent=2)
         if len(json_data) > max_len:
@@ -525,6 +585,34 @@ class MainFrame(wx.Frame):
         if wx.TheClipboard.Open():
             wx.TheClipboard.SetData(wx.TextDataObject(text))
             wx.TheClipboard.Close()
+
+    def _on_find(self, _event):
+        dlg = wx.TextEntryDialog(self, "Find in prompt:", "Find", value=self._last_find_query)
+        if dlg.ShowModal() == wx.ID_OK:
+            query = dlg.GetValue()
+            dlg.Destroy()
+            if query:
+                if query != self._last_find_query:
+                    self._last_find_pos = 0
+                self._last_find_query = query
+                self._find_in_response(query)
+        else:
+            dlg.Destroy()
+
+    def _find_in_response(self, query):
+        text = self.response_text.GetValue()
+        idx = text.lower().find(query.lower(), self._last_find_pos)
+        if idx == -1:
+            idx = text.lower().find(query.lower(), 0)  # wrap around
+        if idx == -1:
+            wx.MessageBox(f'"{query}" not found.', "Find", wx.ICON_INFORMATION)
+            self._last_find_pos = 0
+            return
+        self.response_text.SetFocus()
+        self.response_text.SetInsertionPoint(idx)
+        self.response_text.SetSelection(idx, idx + len(query))
+        self.response_text.ShowPosition(idx)
+        self._last_find_pos = idx + len(query)
 
 if __name__ == "__main__":
     app = GarminCoachApp()
