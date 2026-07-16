@@ -133,7 +133,6 @@ class MainFrame(wx.Frame):
         self.garmin_data = None
         self.gm = GarminManager(cache_dir=CACHE_DIR)
         self.questions = self.config["questions"]
-        self._save_pwd_pref = False  # remembers the last "save password" checkbox state this session
 
         self._build_ui()
         self.Centre()
@@ -201,18 +200,22 @@ class MainFrame(wx.Frame):
         box = wx.BoxSizer(wx.VERTICAL)
         box.Add(self._section_title("2 — Garmin Data"), flag=wx.BOTTOM, border=8)
 
-        row = wx.BoxSizer(wx.HORIZONTAL)
         self.data_status_lbl = wx.StaticText(self.scroll, label="Checking cache…")
         self.fetch_btn = wx.Button(self.scroll, label="Fetch data from Garmin")
         self.fetch_btn.Bind(wx.EVT_BUTTON, self._on_fetch)
         self.days_ctrl = wx.TextCtrl(self.scroll, value=str(DEFAULT_DAYS_TO_FETCH), size=(40, -1))
-
+        row = wx.BoxSizer(wx.HORIZONTAL)
         row.Add(self.data_status_lbl, proportion=1, flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
-        row.Add(wx.StaticText(self.scroll, label="Days to fetch:"), flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
-        row.Add(self.days_ctrl, flag=wx.ALIGN_CENTER_VERTICAL)
-        row.AddSpacer(10)
-        row.Add(self.fetch_btn, flag=wx.ALIGN_CENTER_VERTICAL)
+
+        row2 = wx.BoxSizer(wx.HORIZONTAL)
+
+        row2.Add(wx.StaticText(self.scroll, label="Days to fetch:"), flag=wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, border=8)
+        row2.Add(self.days_ctrl, flag=wx.ALIGN_CENTER_VERTICAL)
+        row2.AddSpacer(10)
+        row2.Add(self.fetch_btn, flag=wx.ALIGN_CENTER_VERTICAL)
         box.Add(row, flag=wx.EXPAND)
+        box.AddSpacer(8)
+        box.Add(row2, flag=wx.EXPAND)
         self.fetch_gauge = wx.Gauge(self.scroll, range=100)
         self.fetch_gauge.Hide()
         box.Add(self.fetch_gauge, flag=wx.EXPAND | wx.TOP, border=8)
@@ -434,12 +437,23 @@ class MainFrame(wx.Frame):
         if cached:
             self.garmin_data = cached
             fetch_date_str = cached.get("fetch_date")
-            status_text = f"✓  Cached data loaded for {user['name']}"
+            activities = cached.get("activities", [])
+            activity_count = len(activities)
+
+            oldest_str = ""
+            if activities:
+                try:
+                    oldest = min(activities, key=lambda a: a["startTimeLocal"])
+                    oldest_str = f", oldest {oldest['startTimeLocal'][:10]}"
+                except Exception:
+                    pass
+
+            status_text = f"✓  Cached data loaded for {user['name']} ({activity_count} activities{oldest_str})"
             if fetch_date_str:
                 try:
                     fetch_date = datetime.date.fromisoformat(fetch_date_str)
                     age = (datetime.date.today() - fetch_date).days
-                    status_text = f"✓  Cached data ({age}d old) for {user['name']}"
+                    status_text = f"✓  Cached data ({age}d old, {activity_count} activities{oldest_str}) for {user['name']}"
                     if age >= 1:
                         self._set_status(status_text + " (stale, re-fetching...)", ok=False)
                         wx.CallAfter(self._on_fetch, None, auto=True)
@@ -465,16 +479,19 @@ class MainFrame(wx.Frame):
             dlg = wx.MessageDialog(self, f"Refresh fresh data from Garmin for {user['name']}?", "Confirm", wx.YES_NO | wx.ICON_QUESTION)
             if dlg.ShowModal() != wx.ID_YES: return
 
-        password = self.gm.get_password(user["email"]) if self._save_pwd_pref else None
+        remember = user.get("remember_password", False)
+        password = self.gm.get_password(user["email"]) if remember else None
         if not password:
-            pwd_dlg = PasswordDialog(self, f"Enter Garmin password for {user['email']}:", "Login", remember_default=self._save_pwd_pref)
+            pwd_dlg = PasswordDialog(self, f"Enter Garmin password for {user['email']}:", "Login", remember_default=remember)
             if pwd_dlg.ShowModal() != wx.ID_OK:
                 pwd_dlg.Destroy()
                 return
             password = pwd_dlg.GetValue()
-            self._save_pwd_pref = pwd_dlg.GetRemember()
+            remember = pwd_dlg.GetRemember()
             pwd_dlg.Destroy()
-            if self._save_pwd_pref:
+            user["remember_password"] = remember
+            save_config(self.config)
+            if remember:
                 self.gm.save_password(user["email"], password)
 
         self._start_fetch(user, password)
@@ -506,12 +523,14 @@ class MainFrame(wx.Frame):
             choice.SetYesNoCancelLabels("New Password", "Retry", "Cancel")
             result = choice.ShowModal()
             if result == wx.ID_YES:
-                pwd_dlg = PasswordDialog(self, f"Enter new Garmin password for {user['name']}:", "Login", remember_default=self._save_pwd_pref)
+                pwd_dlg = PasswordDialog(self, f"Enter new Garmin password for {user['name']}:", "Login", remember_default=user.get("remember_password", False))
                 if pwd_dlg.ShowModal() == wx.ID_OK:
                     new_password = pwd_dlg.GetValue()
-                    self._save_pwd_pref = pwd_dlg.GetRemember()
+                    remember = pwd_dlg.GetRemember()
                     pwd_dlg.Destroy()
-                    if self._save_pwd_pref:
+                    user["remember_password"] = remember
+                    save_config(self.config)
+                    if remember:
                         self.gm.save_password(user["email"], new_password)
                     self._start_fetch(user, new_password)
                 else:
@@ -547,8 +566,8 @@ class MainFrame(wx.Frame):
         if "activities" in data_to_serialize:
             # Sort from oldest to newest using the date string
             data_to_serialize["activities"].sort(key=lambda x: x["startTimeLocal"])
-            # Slice to the maximum number of allowed activities
-            data_to_serialize["activities"] = data_to_serialize["activities"][:max_act]
+            # Slice to the maximum number of allowed activities, starting from the top and going down
+            data_to_serialize["activities"] = data_to_serialize["activities"][max_act:]
         json_data = json.dumps(data_to_serialize, indent=2)
         if len(json_data) > max_len:
             json_data = "... [Truncated] ...\n" + json_data[-max_len:]
