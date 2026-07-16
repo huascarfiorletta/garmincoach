@@ -566,7 +566,7 @@ class MainFrame(wx.Frame):
             # Sort from oldest to newest using the date string
             data_to_serialize["activities"].sort(key=lambda x: x["startTimeLocal"])
             # Slice to the maximum number of allowed activities, starting from the top and going down
-            data_to_serialize["activities"] = data_to_serialize["activities"][max_act:]
+            data_to_serialize["activities"] = data_to_serialize["activities"][-max_act:]
         json_data = json.dumps(data_to_serialize, indent=2)
         if len(json_data) > max_len:
             json_data = "... [Truncated] ...\n" + json_data[-max_len:]
@@ -633,6 +633,5 @@ class MainFrame(wx.Frame):
         self._last_find_pos = idx + len(query)
 
 if __name__ == "__main__":
-    print("debug fix")
     app = GarminCoachApp()
     app.MainLoop()
