@@ -265,14 +265,14 @@ class MainFrame(wx.Frame):
         # self.ask_btn = wx.Button(self.scroll, label="Ask Coach", size=(-1, 42))
         # self.ask_btn.SetFont(wx.Font(11, wx.FONTFAMILY_DEFAULT, wx.FONTSTYLE_NORMAL, wx.FONTWEIGHT_BOLD))
         # self.ask_btn.Bind(wx.EVT_BUTTON, self._on_ask)
-        self.create_query_btn = wx.Button(self.scroll, label="Create query", size=(-1, 42))
-        self.create_query_btn.Bind(wx.EVT_BUTTON, self._on_create_query_only)
+        self.create_prompt_btn = wx.Button(self.scroll, label="Create prompt", size=(-1, 42))
+        self.create_prompt_btn.Bind(wx.EVT_BUTTON, self._on_create_prompt_only)
         self.copy_btn = wx.Button(self.scroll, label="Copy Response")
         self.copy_btn.Bind(wx.EVT_BUTTON, self._on_copy_response)
         # box.Add(copy_btn, flag=wx.TOP | wx.ALIGN_RIGHT, border=6)
 
         # btn_row.Add(self.ask_btn, proportion=2, flag=wx.EXPAND | wx.RIGHT, border=8)
-        btn_row.Add(self.create_query_btn, proportion=1, flag=wx.EXPAND)
+        btn_row.Add(self.create_prompt_btn, proportion=1, flag=wx.EXPAND)
         btn_row.AddSpacer(10)
         btn_row.Add(self.copy_btn, proportion=1, flag=wx.EXPAND)
         box.Add(btn_row, flag=wx.EXPAND)
@@ -540,10 +540,9 @@ class MainFrame(wx.Frame):
             # else: Cancel — do nothing
         else:
             self.garmin_data = data
-            self._set_status(f"✓  Live data fetched for {self._current_user()['name']}", ok=True)
-            self._on_create_query_only(None)
+            self._on_create_prompt_only(None)
 
-    def _on_create_query_only(self, _event):
+    def _on_create_prompt_only(self, _event):
         prompt = self._get_prompt()
         if prompt: self.response_text.SetValue(prompt)
 
@@ -634,5 +633,6 @@ class MainFrame(wx.Frame):
         self._last_find_pos = idx + len(query)
 
 if __name__ == "__main__":
+    print("debug fix")
     app = GarminCoachApp()
     app.MainLoop()
